@@ -1,0 +1,137 @@
+---
+title: "Analisis Clustering Concrete Compressive Strength Dataset"
+author: "Riefan Abdul Hakim"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+  html_document:
+    toc: true
+    toc_float: true
+    theme: darkly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# A. Pendahuluan
+Dataset yang digunakan untuk analisis ini adalah Concrete Compressive Strength Dataset dari UCI Machine Learning Repository. Dataset dapat diakses secara publik pada tautan:
+
+<https://archive.ics.uci.edu/dataset/165/concrete+compressive+strength>
+
+Tujuan analisis dataset ini adalah untuk mengelompokkan karakteristik berbagai perlakuan dan jenis adukan beton berdasarkan komposisinya dengan menggunakan dua metode yaitu K-Means dan Hierarchical Clustering. Performa keduanya kemudian divalidasi dengan Silhouette Score.
+
+# B. Persiapan & Pembersihan Data
+Memuat package yang diperlukan
+```{r library}
+# Memuat library
+library(tidyverse)
+library(cluster)
+library(factoextra)
+library(readxl)
+```
+
+Membaca dan mengecek apakah ada data yang kosong
+```{r read}
+# Membaca data
+data_concrete <- read_excel("Concrete_Data.xlsx")
+summary(data_concrete)
+
+sum(is.na(data_concrete)) # Cek apakah ada data kosong (NA)
+```
+
+Karena nama kolom yang didapat dari sumber dataset terlalu rumit maka kita akan sederhanakan agar mudah dibaca dan dieksekusi
+```{r }
+# Menyederhanakan nama kolom agar lebih mudah diolah
+colnames(data_concrete) <- c("Cement",
+                             "Blast_Furnace_Slag",
+                             "Fly_Ash",
+                             "Water", 
+                             "Superplasticizer",
+                             "Coarse_Aggregate",
+                             "Fine_Aggregate", 
+                             "Age",
+                             "Compressive_Strength")
+```
+
+Buang variabel target karena kita akan melakukan unsupervised learning
+```{r}
+# Membuang variabel target (Compressive_Strength) 
+df <- data_concrete %>% select(-Compressive_Strength)
+```
+
+Karena dataset memiliki rentang nilai (skala) yang sangat berbeda jauh kita akan scalling agar skala nya seragam
+```{r}
+# Scaling data (Sangat Penting untuk data beton ini!)
+df_scaled <- scale(df)
+```
+
+# C. Menentukan Jumlah Cluster
+Menentukan jumlah cluster yang optimal untuk dataset kita akan menggunakan  metode Silhouette untuk mencari nilai $k$ yang memberikan pemisahan paling rapi.
+```{r, fig.height = 9}
+fviz_nbclust(df_scaled, kmeans, method = "silhouette") +
+  labs(subtitle = "Metode Silhouette untuk Menentukan k Optimal")
+```
+
+Berdasarkan grafik tersebut, dapat disimpulkan bahwa k optimal nya adalah 9.
+```{r}
+# k optimal = 9
+k_optimal <- 9
+```
+
+# D. Clustering
+## 1. K-Means Clustering
+```{r}
+set.seed(020) 
+km_res <- kmeans(df_scaled, centers = k_optimal, nstart = 25)
+
+# Visualisasi Hasil K-Means
+fviz_cluster(km_res, data = df_scaled, geom = "point",
+             main = "Visualisasi K-Means pada Data Adukan Beton", 
+             ellipse.type = "convex")
+
+# Menghitung dan menyimpan rata-rata Silhouette Score
+sil_km <- silhouette(km_res$cluster, dist(df_scaled))
+avg_sil_km <- mean(sil_km[, 3])
+cat("Rata-rata Silhouette Score (K-Means):", avg_sil_km, "\n")
+```
+
+Hal yang bisa disimpulkan dari grafik ini adalah banyaknya tumpukan antar area cluster (misalnya cluster 3, 4, 5, dan 6 posisinya saling tabrakan). 
+
+
+## 2. Hierarchical Clustering : Complete Linkage
+
+```{r}
+# Menghitung matriks jarak Euclidean
+d <- dist(df_scaled, method = "euclidean")
+
+# Membuat model Hierarchical Clustering : Complete Linkage
+hc_res <- hclust(d, method = "complete")
+
+# Memotong dendrogram sesuai jumlah cluster optimal
+hc_clusters <- cutree(hc_res, k = k_optimal)
+
+# Visualisasi Dendrogram
+fviz_dend(hc_res, k = k_optimal, rect = TRUE, show_labels = FALSE, lwd = 0.1,
+          main = "Dendrogram Hierarchical Clustering")
+
+# Menghitung dan menyimpan rata-rata Silhouette Score
+sil_hc <- silhouette(hc_clusters, d)
+avg_sil_hc <- mean(sil_hc[, 3])
+cat("Rata-rata Silhouette Score (Hierarchical):", avg_sil_hc, "\n")
+```
+
+Berdasarakan dendogram tersebut, data beton yang berada di dalam warna yang sama berarti mereka dikelompokkan ke dalam satu cluster yang sama karena karakteristik mereka mirip.
+
+# Validation & Kesimpulan
+```{r}
+# Tabel Perbandingan
+comparison <- data.frame(
+  Metode = c("K-Means", "Hierarchical (Complete)"),
+  Average_Silhouette = c(avg_sil_km, avg_sil_hc)
+)
+# Menampilkan hasil
+comparison %>% arrange(desc(Average_Silhouette))
+```
+Berdasarkan tabel karena K-Means memiliki Silhouette Score lebih tinggi, metode K-Means terbukti lebih cocok untuk memetakan variasi komposisi beton dibandingkan Hierarchical Clustering.
